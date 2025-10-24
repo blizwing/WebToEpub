@@ -92,6 +92,7 @@
         <li><a href="#how-to-use-with-baka-tsuki">How to use with Baka-Tsuki</a></li>
         <li><a href="#how-to-use-with-archive-of-our-own">How to use with Archive of Our Own</a></li>
         <li><a href="#how-to-use-for-site-that-there-is-no-specific-parser-for">How to use for site that there is no specific parser for</a></li>
+        <li><a href="#how-to-configure-parallel-chapter-downloads">How to configure parallel chapter downloads</a></li>
         <li><a href="#how-to-create-parsers-for-new-sites">How to create Parsers for new sites</a></li>
       </ul>
     </li>
@@ -678,7 +679,37 @@ Open Firefox and visit [WebToEpub on Firefox Add-ons][firefox-add-ons].
    - Lint tests are OK if output ends with `Wrote Zip to disk; Done in XXXs.`
    - To auto-fix lint errors run `npm run lint:fix`
 
-3. Install extension in browser of choice, using instructions above.
+3. Install the built extension in your browser.
+
+   #### Installing the built extension in Firefox:
+
+   - Open Firefox and type `about:debugging#/runtime/this-firefox` into the URL bar
+   - Click "Load Temporary Add-on"
+   - Navigate to the `eslint` directory
+   - Select the `WebToEpub0.0.0.x.xpi` file
+   - The extension will be loaded temporarily (it will be removed when you restart Firefox)
+
+   **For permanent installation in Firefox:**
+   - Type `about:config` in the URL bar
+   - Search for `xpinstall.signatures.required` and set it to `false` (this disables signature verification)
+   - Type `about:addons` in the URL bar
+   - Click the gear icon and select "Install Add-on From File"
+   - Navigate to the `eslint` directory and select `WebToEpub0.0.0.x.xpi`
+   - **Note:** Remember to re-enable `xpinstall.signatures.required` when done for security
+
+   #### Installing the built extension in Chrome/Edge/Chromium:
+
+   - Unpack the `WebToEpub0.0.0.x.zip` file from the `eslint` directory to a folder (e.g., `eslint/chrome-unpacked/`)
+   - Open your browser and navigate to:
+     - Chrome: `chrome://extensions`
+     - Edge: `edge://extensions`
+     - Other Chromium browsers: `browser://extensions`
+   - Enable "Developer mode" using the toggle at the top right
+   - Click "Load unpacked"
+   - Navigate to and select the unpacked folder containing the extension files
+   - The extension will now be loaded in developer mode
+
+   **Note:** Extensions loaded in developer mode will show a warning banner. This is normal for unpacked extensions.
 
 See [notes](#notes) for more information.
 
@@ -708,6 +739,51 @@ See [notes](#notes) for more information.
 ### How to use for site that there is no specific parser for:
 
 See: https://github.com/dteviot/WebToEpub/wiki/FAQ#how-to-convert-a-new-site-using-the-default-parser
+
+### How to configure parallel chapter downloads:
+
+WebToEpub can download multiple chapters simultaneously to speed up the overall download process while respecting rate limits to avoid overwhelming websites.
+
+#### Adjusting Settings:
+
+1. Click on the WebToEpub icon to open the extension popup
+2. Click the **"Advanced Options"** button to expand advanced settings
+3. Scroll down to find the download settings section
+4. Configure the following options:
+   - **Max concurrent chapter downloads**: Set how many chapters can download at the same time (range: 1-10, default: 3)
+   - **Delay per chapter in ms**: Set the minimum delay between starting each chapter download (default: 500ms)
+   - **Override Default Minimum Delay**: Check this to override the parser's built-in minimum delay
+
+#### Recommended Settings:
+
+**For fast, permissive sites:**
+- Max concurrent downloads: 5-10
+- Delay per chapter: 200-300ms
+
+**For sites with rate limiting (recommended default):**
+- Max concurrent downloads: 3
+- Delay per chapter: 500ms
+
+**For strict sites or if you experience 403/429 errors:**
+- Max concurrent downloads: 1 (sequential downloading)
+- Delay per chapter: 1000-2000ms
+
+#### How it works:
+
+Instead of downloading chapters one after another, WebToEpub now starts multiple downloads in parallel:
+
+- **Sequential (old behavior)**: Chapter 1 → wait → Chapter 2 → wait → Chapter 3
+- **Parallel (new behavior)**: Chapter 1, 2, 3 all start with delays between starts, then download simultaneously
+
+This significantly reduces total download time while still respecting rate limits by controlling:
+1. How many chapters download at once (concurrency limit)
+2. The minimum time between starting each download (rate limit delay)
+
+#### Notes:
+
+- Some parsers have site-specific defaults that override user settings for optimal compatibility
+- If you experience download errors, reduce the concurrent downloads or increase the delay
+- The rate limiting delay is applied between starting downloads, not their completion
 
 ### How to create Parsers for new sites
 

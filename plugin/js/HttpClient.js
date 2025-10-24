@@ -25,6 +25,11 @@ class FetchErrorHandler {
     }
 
     onFetchError(url, error) {
+        // Enhanced error logging for debugging permission issues
+        console.error("Fetch error for URL:", url);
+        console.error("Error message:", error.message);
+        console.error("Error type:", error.name);
+        console.error("Full error:", error);
         return Promise.reject(new Error(this.makeFailMessage(url, error.message)));
     }
 
@@ -149,7 +154,10 @@ class HttpClient {
     }
 
     static makeOptions() {
-        return { credentials: "include" };
+        return {
+            credentials: "include",
+            mode: "cors"  // Explicitly set CORS mode for cross-origin requests
+        };
     }
 
     static wrapFetch(url, wrapOptions) {
@@ -207,7 +215,9 @@ class HttpClient {
         }
         try
         {
+            console.log("Fetching URL:", url, "with options:", wrapOptions.fetchOptions);
             let response = await fetch(url, wrapOptions.fetchOptions);
+            console.log("Fetch successful for:", url, "Status:", response.status);
             let ret = await HttpClient.checkResponseAndGetData(url, wrapOptions, response);
             if (wrapOptions.parser?.isCustomError(ret)) {
                 let CustomErrorResponse = wrapOptions.parser.setCustomErrorResponse(url, wrapOptions, ret);
@@ -217,6 +227,8 @@ class HttpClient {
         }
         catch (error)
         {
+            console.error("Fetch failed for:", url);
+            console.error("Fetch options were:", wrapOptions.fetchOptions);
             return wrapOptions.errorHandler.onFetchError(url, error);
         }
     }

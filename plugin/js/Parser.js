@@ -51,13 +51,18 @@ class ParserState {
     }
 }
 
-class Parser {    
+class Parser {
     constructor(imageCollector) {
-        this.minimumThrottle = 500;
-        this.maxSimultanousFetchSize = 1;
+        // Rate limiting configuration
+        // Override these in parser subclasses for site-specific requirements
+        this.minimumThrottle = 500; // Minimum delay between starting chapter downloads (in ms)
+        this.maxSimultanousFetchSize = 1; // Legacy: kept for backward compatibility
+        this.maxConcurrentDownloads = 3; // Default max concurrent chapter downloads (can be overridden per parser)
+
         this.state = new ParserState();
         this.imageCollector = imageCollector || new ImageCollector();
         this.userPreferences = null;
+        this.rateLimiter = null; // Will be initialized when user preferences are set
     }
 
     copyState(otherParser) {
@@ -98,6 +103,33 @@ class Parser {
     onUserPreferencesUpdate(userPreferences) {
         this.userPreferences = userPreferences;
         this.imageCollector.onUserPreferencesUpdate(userPreferences);
+        this.initializeRateLimiter();
+    }
+
+    initializeRateLimiter() {
+        if (!this.userPreferences) {
+            return;
+        }
+
+        // Get max concurrent downloads from user preferences or use parser default
+        let maxConcurrent = this.maxConcurrentDownloads;
+        if (this.userPreferences.maxConcurrentDownloads?.value) {
+            let userValue = parseInt(this.userPreferences.maxConcurrentDownloads.value);
+            if (!isNaN(userValue) && userValue > 0) {
+                maxConcurrent = userValue;
+            }
+        }
+
+        // Get rate limit delay
+        let rateLimit = this.getRateLimit();
+
+        // Create or update rate limiter
+        if (this.rateLimiter) {
+            this.rateLimiter.setMaxConcurrent(maxConcurrent);
+            this.rateLimiter.setMinDelayBetweenStarts(rateLimit);
+        } else {
+            this.rateLimiter = new RateLimiter(maxConcurrent, rateLimit);
+        }
     }
 
     isWebPagePackable(webPage) {
@@ -535,23 +567,24 @@ class Parser {
         this.imageCollector.setCoverImageUrl(CoverImageUI.getCoverImageUrl());
 
         await this.addParsersToPages(pagesToFetch);
-        let index = 0;
-        try
-        {
-            let group = this.groupPagesToFetch(pagesToFetch, index);
-            while (0 < group.length) {
-                await Promise.all(group.map(async (webPage) => this.fetchWebPageContent(webPage)));
-                index += group.length;
-                group = this.groupPagesToFetch(pagesToFetch, index);
+
+        // Initialize rate limiter if not already done
+        if (!this.rateLimiter) {
+            this.initializeRateLimiter();
+        }
+
+        // Use rate limiter for parallel downloads with rate limiting
+        let downloadPromises = pagesToFetch.map(webPage =>
+            this.rateLimiter.execute(async () => {
                 if (util.sleepController.signal.aborted) {
-                    break;
+                    return;
                 }
-            }
-        }
-        catch (err)
-        {
-            ErrorLog.log(err);
-        }
+                await this.fetchWebPageContent(webPage);
+            })
+        );
+
+        // Wait for ALL chapters to complete downloading before proceeding to pack EPUB
+        await Promise.all(downloadPromises);
     }
 
     async addParsersToPages(pagesToFetch) {
@@ -563,29 +596,53 @@ class Parser {
     }
 
     async fetchWebPageContent(webPage) {
-        ChapterUrlsUI.showDownloadState(webPage.row, ChapterUrlsUI.DOWNLOAD_STATE_SLEEPING);
-        await this.rateLimitDelay();
         ChapterUrlsUI.showDownloadState(webPage.row, ChapterUrlsUI.DOWNLOAD_STATE_DOWNLOADING);
         let pageParser = webPage.parser;
-        try {
-            let webPageDom = await pageParser.fetchChapter(webPage.sourceUrl);
-            delete webPage.error;
-            webPage.rawDom = webPageDom;
-            pageParser.preprocessRawDom(webPageDom);
-            pageParser.removeUnusedElementsToReduceMemoryConsumption(webPageDom);
-            let content = pageParser.findContent(webPage.rawDom);
-            if (content == null) {
-                let errorMsg = UIText.Error.errorContentNotFound(webPage.sourceUrl);
-                throw new Error(errorMsg);
-            }
-            return pageParser.fetchImagesUsedInDocument(content, webPage);
-        } catch (error) {
-            if (this.userPreferences.skipChaptersThatFailFetch.value) {
-                ErrorLog.log(error);
-                webPage.error = error;
-            } else {
-                webPage.isIncludeable = false;
-                throw error;
+
+        // Retry configuration: up to 3 retries with 3-5 second delays
+        const maxRetries = 3;
+        let lastError = null;
+
+        for (let retryAttempt = 0; retryAttempt <= maxRetries; retryAttempt++) {
+            try {
+                let webPageDom = await pageParser.fetchChapter(webPage.sourceUrl);
+                delete webPage.error;
+                webPage.rawDom = webPageDom;
+                pageParser.preprocessRawDom(webPageDom);
+                pageParser.removeUnusedElementsToReduceMemoryConsumption(webPageDom);
+                let content = pageParser.findContent(webPage.rawDom);
+                if (content == null) {
+                    let errorMsg = UIText.Error.errorContentNotFound(webPage.sourceUrl);
+                    throw new Error(errorMsg);
+                }
+                // Fetch images and update progress
+                await pageParser.fetchImagesUsedInDocument(content, webPage);
+                // Mark chapter as complete in UI (updates happen as soon as each chapter finishes)
+                ChapterUrlsUI.showDownloadState(webPage.row, ChapterUrlsUI.DOWNLOAD_STATE_LOADED);
+                ProgressBar.updateValue(1);
+                return; // Success - exit retry loop
+            } catch (error) {
+                lastError = error;
+
+                // If this wasn't the last retry attempt, wait and try again
+                if (retryAttempt < maxRetries) {
+                    // Wait 3-5 seconds before retrying
+                    const delayMs = 3000 + Math.random() * 2000;
+                    console.log(`Chapter download failed: ${webPage.sourceUrl}. Retrying in ${(delayMs / 1000).toFixed(1)}s (attempt ${retryAttempt + 1}/${maxRetries})`);
+                    await util.sleep(delayMs);
+                    continue; // Try again
+                }
+
+                // All retries exhausted - handle error
+                if (this.userPreferences.skipChaptersThatFailFetch.value) {
+                    ErrorLog.log(lastError);
+                    webPage.error = lastError;
+                    ChapterUrlsUI.showDownloadState(webPage.row, ChapterUrlsUI.DOWNLOAD_STATE_LOADED);
+                    ProgressBar.updateValue(1); // Update progress bar even for failed chapters
+                } else {
+                    webPage.isIncludeable = false;
+                    throw lastError;
+                }
             }
         }
     }
@@ -594,7 +651,7 @@ class Parser {
         let revisedContent = await this.imageCollector.preprocessImageTags(content, webPage.sourceUrl);
         this.imageCollector.findImagesUsedInDocument(revisedContent);
         await this.imageCollector.fetchImages(() => { }, webPage.sourceUrl);
-        this.updateLoadState(webPage);
+        // Progress update moved to fetchWebPageContent for better real-time feedback
     }
 
     /**

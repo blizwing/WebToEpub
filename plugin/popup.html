@@ -472,6 +472,12 @@
                         <td><input id="overrideMinimumDelayCheckbox" type="checkbox" name="overrideMinimumDelayCheckbox" value="false"></td>
                         <td>__MSG_label_Override_Default_Minimum_Delay__</td>
                     </tr>
+                    <tr id="maxConcurrentDownloads">
+                        <td>
+                            <input id="maxConcurrentDownloadsTag" type="number" name="maxConcurrentDownloadsTag" min="1" max="10" style="width: 61px;">
+                        </td>
+                        <td>__MSG_label_Max_Concurrent_Downloads__</td>
+                    </tr>
                     <tr id="IncludeInReadingListRow">
                         <td><input id="includeInReadingListCheckbox" type="checkbox" name="includeInReadingListCheckbox" value="false"></td>
                         <td>__MSG_label_Include_in_Reading_List__</td>
@@ -598,6 +604,7 @@
         <script src="js/ChapterUrlsUI.js"></script>
         <script src="js/DefaultParserUI.js"></script>
         <script src="js/ProgressBar.js"></script>
+        <script src="js/RateLimiter.js"></script>
         <script src="js/Parser.js"></script>
         <script src="js/Library.js"></script>
 

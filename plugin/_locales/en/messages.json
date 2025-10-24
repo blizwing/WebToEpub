@@ -355,6 +355,10 @@
 		"message": "Delay per chapter in ms",
 		"description": "Delay per chapter in ms"
 	},
+	"__MSG_label_Max_Concurrent_Downloads__": {
+		"message": "Max concurrent chapter downloads",
+		"description": "Maximum number of chapters to download simultaneously"
+	},
 	"__MSG_label_Manually_Select_Parser__": {
 		"message": "Manually Select Parser:",
 		"description": "Label for menu to change parser (in advanced options section)"

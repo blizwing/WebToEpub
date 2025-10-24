@@ -31,9 +31,16 @@ class TemplateParser extends Parser { // eslint-disable-line no-unused-vars
         //Optional Parameters:
 
         /*
-        // Minimum delay (in ms) between page requests. Useful for 403 error prevention.
+        // Minimum delay (in ms) between starting chapter downloads. Useful for 403 error prevention.
         // If the sites this parser accesses throttles requests or uses cloudflare, it is recommended to set this.
         this.minimumThrottle = 3000;
+
+        // Maximum number of concurrent chapter downloads (default is 3).
+        // Lower this for sites with strict rate limiting, or increase for faster downloads on permissive sites.
+        // Examples:
+        //   this.maxConcurrentDownloads = 1;  // Download chapters one at a time (most conservative)
+        //   this.maxConcurrentDownloads = 5;  // Download up to 5 chapters simultaneously (aggressive)
+        this.maxConcurrentDownloads = 2;
         */
     }
 

@@ -566,6 +566,7 @@ class Parser {
         main.getPackEpubButton().disabled = true;
         ProgressBar.setMax(length + 1);
         ProgressBar.setValue(1);
+        ProgressBar.startTimer();
     }
 
     async fetchWebPages() {

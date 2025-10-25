@@ -2,7 +2,7 @@
 "use strict";
 
 /**
-   Code to manipulate the Progress Bar on the UI 
+   Code to manipulate the Progress Bar on the UI
 */
 class ProgressBar { // eslint-disable-line no-unused-vars
     constructor() {
@@ -15,16 +15,19 @@ class ProgressBar { // eslint-disable-line no-unused-vars
     static setValue(value) {
         ProgressBar.getUiElement().value = value;
         ProgressBar.updateText();
+        ProgressBar.updateTimeInfo();
     }
 
     static updateValue(increment) {
         ProgressBar.getUiElement().value += increment;
         ProgressBar.updateText();
+        ProgressBar.updateTimeInfo();
     }
 
     static setMax(max) {
         ProgressBar.getUiElement().max = max;
         ProgressBar.updateText();
+        ProgressBar.updateTimeInfo();
     }
 
     static updateText() {
@@ -44,4 +47,96 @@ class ProgressBar { // eslint-disable-line no-unused-vars
         }
         document.title = value + "% WebToEpub";
     }
+
+    // Timer tracking for elapsed time and ETA
+    static startTimer() {
+        ProgressBar.startTime = Date.now();
+        ProgressBar.lastUpdateTime = ProgressBar.startTime;
+
+        // Update timer display every second
+        if (ProgressBar.timerInterval) {
+            clearInterval(ProgressBar.timerInterval);
+        }
+        ProgressBar.timerInterval = setInterval(() => {
+            ProgressBar.updateTimeInfo();
+        }, 1000);
+    }
+
+    static stopTimer() {
+        if (ProgressBar.timerInterval) {
+            clearInterval(ProgressBar.timerInterval);
+            ProgressBar.timerInterval = null;
+        }
+        // Clear time displays
+        let elapsedElement = document.getElementById("elapsedTime");
+        let etaElement = document.getElementById("etaTime");
+        if (elapsedElement) {
+            elapsedElement.textContent = "";
+        }
+        if (etaElement) {
+            etaElement.textContent = "";
+        }
+    }
+
+    static formatTime(milliseconds) {
+        let totalSeconds = Math.floor(milliseconds / 1000);
+        let hours = Math.floor(totalSeconds / 3600);
+        let minutes = Math.floor((totalSeconds % 3600) / 60);
+        let seconds = totalSeconds % 60;
+
+        if (hours > 0) {
+            return `${hours}h ${minutes}m ${seconds}s`;
+        } else if (minutes > 0) {
+            return `${minutes}m ${seconds}s`;
+        } else {
+            return `${seconds}s`;
+        }
+    }
+
+    static updateTimeInfo() {
+        if (!ProgressBar.startTime) {
+            return;
+        }
+
+        let element = ProgressBar.getUiElement();
+        let elapsedElement = document.getElementById("elapsedTime");
+        let etaElement = document.getElementById("etaTime");
+
+        if (!elapsedElement || !etaElement) {
+            return;
+        }
+
+        let now = Date.now();
+        let elapsed = now - ProgressBar.startTime;
+        let currentValue = element.value;
+        let maxValue = element.max;
+
+        // Update elapsed time
+        elapsedElement.textContent = `Elapsed: ${ProgressBar.formatTime(elapsed)}`;
+
+        // Calculate and update ETA
+        if (currentValue > 0 && currentValue < maxValue) {
+            let progress = currentValue / maxValue;
+            let estimatedTotal = elapsed / progress;
+            let remaining = estimatedTotal - elapsed;
+
+            // Only show ETA if we have reasonable data (at least 2 seconds elapsed and >1% progress)
+            if (elapsed > 2000 && progress > 0.01) {
+                etaElement.textContent = `ETA: ${ProgressBar.formatTime(remaining)}`;
+            } else {
+                etaElement.textContent = "ETA: Calculating...";
+            }
+        } else if (currentValue >= maxValue && maxValue > 1) {
+            // Completed
+            etaElement.textContent = "Completed!";
+            ProgressBar.stopTimer();
+        } else {
+            etaElement.textContent = "";
+        }
+    }
 }
+
+// Initialize timer state
+ProgressBar.startTime = null;
+ProgressBar.lastUpdateTime = null;
+ProgressBar.timerInterval = null;

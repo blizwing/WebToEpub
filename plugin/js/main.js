@@ -186,6 +186,7 @@ var main = (function() {
                 util.sleepController = new AbortController;
             }
             replaceLibAddToLibrary();
+            ProgressBar.stopTimer();
             ErrorLog.showErrorMessage(err);
         });
     }
@@ -410,6 +411,7 @@ var main = (function() {
         ChapterUrlsUI.clearChapterUrlsTable();
         CoverImageUI.clearUI();
         ProgressBar.setValue(0);
+        ProgressBar.stopTimer();
         // Clear the selected value so it doesn't look like a parser is selected
         document.getElementById("manuallySelectParserTag").selectedIndex = -1;
     }

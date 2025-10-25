@@ -604,7 +604,7 @@ class Parser {
         // OPTIMIZATION: Process chapters in BATCHES to prevent browser freezing
         // Only queue up to MAX_BATCH_SIZE chapters at a time to keep memory usage manageable
         // This prevents the browser from freezing on low-end systems when downloading large books
-        let MAX_BATCH_SIZE = 50; // Default: Maximum chapters to queue simultaneously
+        let MAX_BATCH_SIZE = 100; // Default: Maximum chapters to queue simultaneously
 
         // Get user's batch size preference if set
         if (this.userPreferences?.batchDownloadSize?.value) {

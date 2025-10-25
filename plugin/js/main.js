@@ -206,10 +206,10 @@ var main = (function() {
             EpubPacker.EPUB_VERSION_3 : EpubPacker.EPUB_VERSION_2;
     }
 
-    function packEpub(metaInfo) {
+    async function packEpub(metaInfo) {
         let epubVersion = epubVersionFromPreferences();
         let epub = new EpubPacker(metaInfo, epubVersion);
-        return epub.assemble(parser.epubItemSupplier());
+        return await epub.assemble(parser.epubItemSupplier());
     }
 
     function dumpErrorLogToFile() {

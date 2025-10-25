@@ -36,17 +36,78 @@ class EpubPacker {
         return "cover";
     }
 
-    assemble(epubItemSupplier) {
+    async assemble(epubItemSupplier) {
         let zipFileWriter = new zip.BlobWriter("application/epub+zip");
         let zipWriter = new zip.ZipWriter(zipFileWriter,{useWebWorkers: false,compressionMethod: 8, extendedTimestamp: false});
+
+        // Calculate total steps for progress (metadata files + content files)
+        let totalSteps = 5 + epubItemSupplier.files().length; // 5 metadata steps + content files
+        let currentStep = 0;
+
+        // Initialize progress for packing phase
+        if (typeof ProgressBar !== "undefined") {
+            ProgressBar.setMax(totalSteps);
+            ProgressBar.setValue(0);
+        }
+
+        // Yield to event loop before starting assembly
+        await util.sleep(0);
+
         this.addRequiredFiles(zipWriter);
+        currentStep++;
+        if (typeof ProgressBar !== "undefined") {
+            ProgressBar.setValue(currentStep);
+        }
+
+        // Yield after adding required files
+        await util.sleep(0);
+
         zipWriter.add("OEBPS/content.opf", new zip.TextReader(this.buildContentOpf(epubItemSupplier)));
+        currentStep++;
+        if (typeof ProgressBar !== "undefined") {
+            ProgressBar.setValue(currentStep);
+        }
+
+        // Yield after building content.opf
+        await util.sleep(0);
+
         zipWriter.add("OEBPS/toc.ncx", new zip.TextReader(this.buildTableOfContents(epubItemSupplier)));
+        currentStep++;
+        if (typeof ProgressBar !== "undefined") {
+            ProgressBar.setValue(currentStep);
+        }
+
+        // Yield after building toc.ncx
+        await util.sleep(0);
+
         if (this.version === EpubPacker.EPUB_VERSION_3) {
             zipWriter.add("OEBPS/toc.xhtml", new zip.TextReader(this.buildNavigationDocument(epubItemSupplier)));
+            currentStep++;
+            if (typeof ProgressBar !== "undefined") {
+                ProgressBar.setValue(currentStep);
+            }
+            // Yield after building toc.xhtml
+            await util.sleep(0);
         }
-        this.packContentFiles(zipWriter, epubItemSupplier);
+
+        await this.packContentFiles(zipWriter, epubItemSupplier, currentStep);
+
+        // Update to show completion of content packing
+        currentStep = totalSteps - 1;
+        if (typeof ProgressBar !== "undefined") {
+            ProgressBar.setValue(currentStep);
+        }
+
+        // Yield after packing content files
+        await util.sleep(0);
+
         zipWriter.add(util.styleSheetFileName(), new zip.TextReader(this.metaInfo.styleSheet));
+
+        // Final progress update
+        if (typeof ProgressBar !== "undefined") {
+            ProgressBar.setValue(totalSteps);
+        }
+
         return zipWriter.close();
     }
 
@@ -340,10 +401,30 @@ class EpubPacker {
         return navPoint;
     }
 
-    packContentFiles(zipWriter, epubItemSupplier) {
-        for (let file of epubItemSupplier.files()) {
+    async packContentFiles(zipWriter, epubItemSupplier, startStep) {
+        let count = 0;
+        let files = epubItemSupplier.files();
+        let currentStep = startStep;
+
+        for (let file of files) {
             file.packInEpub(zipWriter, this.emptyDocFactory, this.contentValidator);
+
+            // Update progress bar for each file
+            count++;
+            currentStep++;
+            if (typeof ProgressBar !== "undefined") {
+                ProgressBar.setValue(currentStep);
+            }
+
+            // Yield to event loop every 5 files to keep UI responsive
+            if (count % 5 === 0) {
+                await util.sleep(0);
+            }
         }
+
+        // Final yield before adding cover
+        await util.sleep(0);
+
         if (epubItemSupplier.hasCoverImageFile()) {
             let fileContent = epubItemSupplier.makeCoverImageXhtmlFile(this.emptyDocFactory);
             zipWriter.add(EpubPacker.coverImageXhtmlHref(), new zip.TextReader(fileContent));

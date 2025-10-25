@@ -429,18 +429,9 @@ class ImageCollector {
             delete imageInfo.mediaType;
             delete imageInfo.blobImage;
 
-            // Only log 404 errors at verbose level (images from broken links are expected)
-            // Log other errors normally
-            if (error?.message?.includes("404")) {
-                console.warn("Image fetch failed (404): " + imageInfo.sourceUrl);
-            } else {
-                // Log more details about network errors
-                if (error?.message?.includes("Failed to fetch")) {
-                    console.warn("Image fetch network error (retried 3 times): " + imageInfo.sourceUrl);
-                } else {
-                    ErrorLog.log(error);
-                }
-            }
+            // SUPPRESSED: Image fetch errors are non-critical. Missing images don't break the EPUB,
+            // so we suppress these errors to keep the UI clean. Only catastrophic errors will be shown.
+            // Silently continue without logging image fetch failures.
         }
     }
 
@@ -470,11 +461,13 @@ class ImageCollector {
                 if (dataOrigFileUrl != null) {
                     return this.findImageFileUrlUsingDataOrigFileUrl(imageInfo);
                 }
-                if (!this.userPreferences?.disableImageResError?.value) {
-                    let baseUri = xhr.responseXML.baseURI;
-                    let errorMsg = UIText.Error.gotHtmlExpectedImageWarning(baseUri);
-                    ErrorLog.log(errorMsg);
-                }
+                // SUPPRESSED: HTML returned instead of image is non-critical.
+                // The image will be skipped and the EPUB will continue without it.
+                // if (!this.userPreferences?.disableImageResError?.value) {
+                //     let baseUri = xhr.responseXML.baseURI;
+                //     let errorMsg = UIText.Error.gotHtmlExpectedImageWarning(baseUri);
+                //     ErrorLog.log(errorMsg);
+                // }
                 temp = imageInfo.sourceUrl;
             }
             temp = ImageCollector.removeSizeParamsFromWordPressQuery(temp);

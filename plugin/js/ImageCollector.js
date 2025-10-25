@@ -14,6 +14,7 @@ class ImageCollector {
     constructor() {
         this.reset();
         this.userPreferences = null;
+        this.rateLimiter = null;
     }
 
     // An "image collector" with no images
@@ -33,6 +34,7 @@ class ImageCollector {
         this.imagesToFetch = [];
         this.imagesToPack = [];
         this.coverImageInfo = null;
+        this.failedImages = [];
     }
 
     copyState(otherImageCollector) {
@@ -43,6 +45,7 @@ class ImageCollector {
         this.imagesToPack = otherImageCollector.imagesToPack;
         this.coverImageInfo = otherImageCollector.coverImageInfo;
         this.userPreferences = otherImageCollector.userPreferences;
+        this.failedImages = otherImageCollector.failedImages;
     }
 
     addImageInfo(wrappingUrl, sourceUrl, dataOrigFileUrl, fetchFirst) {
@@ -97,25 +100,63 @@ class ImageCollector {
         this.userPreferences = userPreferences;
     }
 
+    /**
+     * Set rate limiter for parallel image fetching
+     * @param {RateLimiter} rateLimiter Rate limiter instance to control concurrent requests
+     */
+    setRateLimiter(rateLimiter) {
+        this.rateLimiter = rateLimiter;
+    }
+
     numberOfImagesToFetch() {
         return this.imagesToFetch.length;
     }
 
     async fetchImages(progressIndicator, parentPageUrl) {
-        let fetchedCount = 0;
-        for (let imageInfo of this.imagesToFetch) {
-            if (!imageInfo.queuedForFetch) {
-                imageInfo.queuedForFetch = true;
-                await this.fetchImage(imageInfo, progressIndicator, parentPageUrl);
-                fetchedCount++;
-
-                // Every 10 images, yield to event loop to allow garbage collection
-                if (fetchedCount % 10 === 0) {
-                    await util.sleep(0);
-                }
-            }
+        if (this.imagesToFetch.length === 0) {
+            return;
         }
+
+        // Use batch-based parallel fetching with rate limiting
+        const IMAGE_BATCH_SIZE = 20; // Fetch images in batches of 20 for parallel processing
+        const imagesToFetch = this.imagesToFetch.filter(img => !img.queuedForFetch);
+
+        for (let batchStart = 0; batchStart < imagesToFetch.length; batchStart += IMAGE_BATCH_SIZE) {
+            const batchEnd = Math.min(batchStart + IMAGE_BATCH_SIZE, imagesToFetch.length);
+            const batch = imagesToFetch.slice(batchStart, batchEnd);
+
+            // Mark all images in batch as queued
+            batch.forEach(imageInfo => {
+                imageInfo.queuedForFetch = true;
+            });
+
+            // Fetch all images in batch in parallel with rate limiting
+            await Promise.all(
+                batch.map(imageInfo =>
+                    this.fetchImageWithRateLimit(imageInfo, progressIndicator, parentPageUrl)
+                )
+            );
+
+            // Yield to event loop every batch to allow garbage collection
+            await util.sleep(0);
+        }
+
         this.imagesToFetch = [];
+    }
+
+    /**
+     * Fetch a single image with rate limiting
+     * @private
+     */
+    async fetchImageWithRateLimit(imageInfo, progressIndicator, parentPageUrl) {
+        // If rate limiter is available, use it; otherwise fetch directly
+        if (this.rateLimiter) {
+            return this.rateLimiter.execute(async () => {
+                return this.fetchImage(imageInfo, progressIndicator, parentPageUrl);
+            });
+        } else {
+            return this.fetchImage(imageInfo, progressIndicator, parentPageUrl);
+        }
     }
 
     /**
@@ -423,15 +464,22 @@ class ImageCollector {
         }
         catch (error)
         {
+            // Track failed image with error details
+            this.failedImages.push({
+                imageInfo: imageInfo,
+                url: imageInfo.sourceUrl || imageInfo.wrappingUrl,
+                error: error,
+                errorMessage: error?.message || String(error),
+                timestamp: new Date().toISOString()
+            });
+
+            // Log error details for debugging
+            console.warn(`Failed to fetch image: ${imageInfo.sourceUrl || imageInfo.wrappingUrl}`, error);
+
             // Clear failed image data to free memory instead of keeping in imagesToPack
-            // Only log the error, don't keep the failed image in memory
             delete imageInfo.arraybuffer;
             delete imageInfo.mediaType;
             delete imageInfo.blobImage;
-
-            // SUPPRESSED: Image fetch errors are non-critical. Missing images don't break the EPUB,
-            // so we suppress these errors to keep the UI clean. Only catastrophic errors will be shown.
-            // Silently continue without logging image fetch failures.
         }
     }
 
@@ -719,6 +767,38 @@ class ImageTagReplacer {
     }
 
     /**
+     * Get the count of failed images
+     * @returns {number} Number of images that failed to fetch
+     */
+    getFailedImageCount() {
+        return this.failedImages.length;
+    }
+
+    /**
+     * Get detailed report of failed images
+     * @returns {Array} Array of failed image objects with details
+     */
+    getFailedImagesReport() {
+        return this.failedImages.map(item => ({
+            url: item.url,
+            errorMessage: item.errorMessage,
+            timestamp: item.timestamp
+        }));
+    }
+
+    /**
+     * Log failed images summary to console
+     */
+    logFailedImagesSummary() {
+        if (this.failedImages.length > 0) {
+            console.warn(`Image fetch summary: ${this.failedImages.length} images failed to fetch`);
+            this.failedImages.forEach((item, index) => {
+                console.warn(`  [${index + 1}] ${item.url} - ${item.errorMessage}`);
+            });
+        }
+    }
+
+    /**
      * Clear all collected image data from memory
      * Called after EPUB is packed to free up resources
      */
@@ -734,5 +814,6 @@ class ImageTagReplacer {
         this.imagesToFetch = [];
         this.imagesToPack = [];
         this.coverImageInfo = null;
+        this.failedImages = [];
     }
 }

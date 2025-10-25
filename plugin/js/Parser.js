@@ -108,7 +108,42 @@ class Parser {
     onUserPreferencesUpdate(userPreferences) {
         this.userPreferences = userPreferences;
         this.imageCollector.onUserPreferencesUpdate(userPreferences);
+        this.validateBatchDownloadSize();
         this.initializeRateLimiter();
+    }
+
+    /**
+     * Validate batch download size and warn user if value is too high
+     * @private
+     */
+    validateBatchDownloadSize() {
+        const MAX_RECOMMENDED_BATCH = 200;
+        const BATCH_WARNING_THRESHOLD = 1000;
+        const MIN_BATCH_SIZE = 1;
+
+        if (!this.userPreferences?.batchDownloadSize?.value) {
+            return;
+        }
+
+        let userBatchSize = parseInt(this.userPreferences.batchDownloadSize.value);
+
+        // Check for invalid values
+        if (isNaN(userBatchSize) || userBatchSize < MIN_BATCH_SIZE) {
+            console.warn(`Invalid batch size: ${this.userPreferences.batchDownloadSize.value}. Using default of 100.`);
+            return;
+        }
+
+        // Warn if batch size is suspiciously high
+        if (userBatchSize > BATCH_WARNING_THRESHOLD) {
+            let message = `Warning: Batch download size of ${userBatchSize} is very high.\n\nWebsites may block continuous downloads of such large batches, causing the download to fail.\n\nRecommended: Keep batch size below ${MAX_RECOMMENDED_BATCH}.\n\nWould you like to continue with batch size ${userBatchSize}?`;
+
+            // Show warning popup
+            if (!confirm(message)) {
+                // Reset to recommended value if user declines
+                this.userPreferences.batchDownloadSize.value = MAX_RECOMMENDED_BATCH;
+                console.log(`Batch size reset to recommended value of ${MAX_RECOMMENDED_BATCH}`);
+            }
+        }
     }
 
     initializeRateLimiter() {
@@ -142,6 +177,9 @@ class Parser {
                 this.rateLimiter = new RateLimiter(maxConcurrent, rateLimit);
             }
         }
+
+        // Inject rate limiter into image collector for parallel image fetching
+        this.imageCollector.setRateLimiter(this.rateLimiter);
     }
 
     isWebPagePackable(webPage) {
@@ -576,6 +614,15 @@ class Parser {
         return this.fetchWebPages();
     }
 
+    /**
+     * Set callback to be called after each batch of chapters is downloaded
+     * Used for incremental EPUB packing
+     * @param {Function} callback - Async function called with (batch, batchNumber)
+     */
+    setOnBatchComplete(callback) {
+        this.onBatchComplete = callback;
+    }
+
     setUiToShowLoadingProgress(length) {
         main.getPackEpubButton().disabled = true;
         ProgressBar.setMax(length + 1);
@@ -648,6 +695,16 @@ class Parser {
 
             // Wait for THIS BATCH to complete before processing next batch
             await Promise.all(batchPromises);
+
+            // Call batch complete callback if provided (for incremental EPUB packing)
+            if (this.onBatchComplete && typeof this.onBatchComplete === "function") {
+                try {
+                    await this.onBatchComplete(batch, Math.floor(batchStart / MAX_BATCH_SIZE) + 1);
+                } catch (error) {
+                    console.error("Error in batch complete callback:", error);
+                    throw error;
+                }
+            }
 
             // No delay between batches - the per-chapter delay from getRateLimit()
             // is already applied via the rate limiter for each chapter

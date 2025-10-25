@@ -37,6 +37,10 @@ class ProgressBar { // eslint-disable-line no-unused-vars
             text = `${element.value}/${element.max}`;
             ProgressBar.updateTabTitle(element.value, element.max);
         }
+        // Add failed images count if available
+        if (ProgressBar.failedImageCount && ProgressBar.failedImageCount > 0) {
+            text += ` (${ProgressBar.failedImageCount} images failed)`;
+        }
         document.getElementById("progressString").textContent = text;
     }
 
@@ -76,6 +80,23 @@ class ProgressBar { // eslint-disable-line no-unused-vars
         if (etaElement) {
             etaElement.textContent = "";
         }
+    }
+
+    /**
+     * Update failed image count display
+     * @param {number} count Number of failed images
+     */
+    static setFailedImageCount(count) {
+        ProgressBar.failedImageCount = count;
+        ProgressBar.updateText();
+    }
+
+    /**
+     * Get current failed image count
+     * @returns {number} Number of failed images
+     */
+    static getFailedImageCount() {
+        return ProgressBar.failedImageCount || 0;
     }
 
     static formatTime(milliseconds) {
@@ -140,3 +161,4 @@ class ProgressBar { // eslint-disable-line no-unused-vars
 ProgressBar.startTime = null;
 ProgressBar.lastUpdateTime = null;
 ProgressBar.timerInterval = null;
+ProgressBar.failedImageCount = 0;

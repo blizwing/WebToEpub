@@ -169,6 +169,19 @@ var main = (function() {
             return Download.save(content, fileName, overwriteExisting, backgroundDownload);
         }).then(() => {
             parser.updateReadingList();
+
+            // Display failed image count if any images failed
+            if (parser && parser.imageCollector && typeof parser.imageCollector.getFailedImageCount === "function") {
+                let failedImageCount = parser.imageCollector.getFailedImageCount();
+                if (failedImageCount > 0) {
+                    ProgressBar.setFailedImageCount(failedImageCount);
+                    parser.imageCollector.logFailedImagesSummary();
+                    // Show warning about failed images
+                    let message = `Warning: ${failedImageCount} image(s) failed to fetch. The EPUB was created successfully, but some images are missing.`;
+                    console.warn(message);
+                }
+            }
+
             // Clear all downloaded data from memory after EPUB is saved
             parser.clearMemory();
             if (util.sleepController.signal.aborted) {
@@ -213,6 +226,68 @@ var main = (function() {
         let epubVersion = epubVersionFromPreferences();
         let epub = new EpubPacker(metaInfo, epubVersion);
         return await epub.assemble(parser.epubItemSupplier());
+    }
+
+    /**
+     * Pack EPUB incrementally as batches are downloaded
+     * Sets up incremental builder and batch completion callback
+     * @param {Object} metaInfo - EPUB metadata
+     * @returns {Promise<Blob>} EPUB file blob
+     * @private
+     */
+    async function packEpubIncrementally(metaInfo) { // eslint-disable-line no-unused-vars
+        let epubVersion = epubVersionFromPreferences();
+        let builder = new IncrementalEpubBuilder(metaInfo, epubVersion);
+
+        // Initialize builder before any batches are packed
+        await builder.initialize();
+
+        // Set callback on parser for when each batch completes
+        parser.setOnBatchComplete(async (batch, batchNumber) => {
+            try {
+                console.log(`Starting to pack batch ${batchNumber}`);
+
+                // Create a temporary supplier for just this batch
+                let batchItems = [];
+                for (let webPage of batch) {
+                    if (webPage.isPackable) {
+                        batchItems.push({
+                            id: webPage.newFileName,
+                            mediaType: webPage.mediaType || "application/xhtml+xml",
+                            getEpubData: () => webPage.getEpubData()
+                        });
+                    }
+                }
+
+                // Add images for this batch (images already fetched for these chapters)
+                let batchImages = parser.imageCollector.imagesToPackInEpub()
+                    .filter(img => !img._packedIncrementally);
+                for (let img of batchImages) {
+                    batchItems.push({
+                        id: img.id,
+                        mediaType: img.mediaType,
+                        arraybuffer: img.arraybuffer
+                    });
+                    img._packedIncrementally = true; // Mark as packed
+                }
+
+                // Pack this batch
+                if (batchItems.length > 0) {
+                    await builder.packBatch(batchItems);
+                    console.log(`Batch ${batchNumber} packed successfully`);
+                }
+            } catch (error) {
+                console.error(`Error packing batch ${batchNumber}:`, error);
+                throw error;
+            }
+        });
+
+        // Download all chapters with batch callbacks
+        await parser.fetchContent();
+
+        // Finalize EPUB with all metadata
+        console.log("Finalizing EPUB...");
+        return await builder.finalize(parser.epubItemSupplier());
     }
 
     function dumpErrorLogToFile() {

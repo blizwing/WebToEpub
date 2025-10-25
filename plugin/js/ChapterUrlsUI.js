@@ -150,11 +150,13 @@ class ChapterUrlsUI {
 
         rangeStart.onchange = null;
         rangeEnd.onchange = null;
-        
+
         rangeStart.selectedIndex = 0;
         rangeEnd.selectedIndex = rangeEnd.length - 1;
-        ChapterUrlsUI.setChapterCount(rangeStart.selectedIndex, rangeEnd.selectedIndex);
-        
+
+        // Trigger the range changed handler to update checkbox states
+        ChapterUrlsUI.onRangeChanged();
+
         rangeStart.onchange = ChapterUrlsUI.onRangeChanged;
         rangeEnd.onchange = ChapterUrlsUI.onRangeChanged;
     }

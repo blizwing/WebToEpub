@@ -146,7 +146,7 @@ class Parser {
 
     isWebPagePackable(webPage) {
         return ((webPage.isIncludeable)
-         && ((webPage.rawDom != null) || (webPage.error != null)));
+         && ((webPage.rawDom != null) || (webPage.processedContent != null) || (webPage.error != null)));
     }
 
     convertRawDomToContent(webPage) {
@@ -279,7 +279,9 @@ class Parser {
     * default implementation turns each webPage into single epub item
     */
     webPageToEpubItems(webPage, epubItemIndex) {
-        let content = this.convertRawDomToContent(webPage);
+        // If content was already processed during download phase (for large books),
+        // use that. Otherwise, process it now.
+        let content = webPage.processedContent || this.convertRawDomToContent(webPage);
         let items = [];
         if (content != null) {
             items.push(new ChapterEpubItem(webPage, content, epubItemIndex));
@@ -677,17 +679,28 @@ class Parser {
                 delete webPage.error;
                 webPage.rawDom = webPageDom;
                 pageParser.preprocessRawDom(webPageDom);
-                pageParser.removeUnusedElementsToReduceMemoryConsumption(webPageDom);
-                let content = pageParser.findContent(webPage.rawDom);
+
+                // MEMORY OPTIMIZATION FOR LARGE BOOKS:
+                // Process content NOW during download phase and store it instead of keeping
+                // the entire rawDom in memory. For large books (3000+ chapters), keeping all
+                // rawDom objects in memory causes severe memory pressure and performance issues.
+                // We'll convert and process the content here, then delete rawDom immediately.
+                // The processed content will be stored in webPage.processedContent for use during packing.
+                let content = this.convertRawDomToContent(webPage);
                 if (content == null) {
                     let errorMsg = UIText.Error.errorContentNotFound(webPage.sourceUrl);
                     throw new Error(errorMsg);
                 }
+
+                // Store the processed content for use during packing
+                webPage.processedContent = content;
+
                 // Fetch images and update progress
                 await pageParser.fetchImagesUsedInDocument(content, webPage);
 
-                // MEMORY OPTIMIZATION: Clear the raw DOM immediately after we're done with it
-                // We've already extracted the content we need, so we can free this memory
+                // MEMORY OPTIMIZATION: Now that we've processed and stored the content,
+                // we can safely delete the large rawDom object. For large books with 3000+
+                // chapters, this frees up significant memory.
                 delete webPage.rawDom;
 
                 // Mark chapter as complete in UI (updates happen as soon as each chapter finishes)

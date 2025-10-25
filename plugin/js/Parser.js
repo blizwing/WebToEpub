@@ -21,8 +21,13 @@ class FetchCache { // eslint-disable-line no-unused-vars
     }
 
     inCache(url) {
-        return (((new URL(url).pathname) === this.path) 
+        return (((new URL(url).pathname) === this.path)
         && (this.dom !== null));
+    }
+
+    clear() {
+        this.dom = null;
+        this.path = null;
     }
 }
 
@@ -123,12 +128,19 @@ class Parser {
         // Get rate limit delay
         let rateLimit = this.getRateLimit();
 
-        // Create or update rate limiter
+        // Create or update adaptive rate limiter (uses AdaptiveRateLimiter if available, falls back to RateLimiter)
         if (this.rateLimiter) {
             this.rateLimiter.setMaxConcurrent(maxConcurrent);
             this.rateLimiter.setMinDelayBetweenStarts(rateLimit);
         } else {
-            this.rateLimiter = new RateLimiter(maxConcurrent, rateLimit);
+            // Use AdaptiveRateLimiter for intelligent rate limit detection and adjustment
+            try {
+                this.rateLimiter = new AdaptiveRateLimiter(maxConcurrent, rateLimit);
+            } catch (e) {
+                // Fallback to standard RateLimiter if AdaptiveRateLimiter is not available
+                console.warn("AdaptiveRateLimiter not available, using standard RateLimiter:", e);
+                this.rateLimiter = new RateLimiter(maxConcurrent, rateLimit);
+            }
         }
     }
 
@@ -587,31 +599,57 @@ class Parser {
             this.initializeRateLimiter();
         }
 
-        // MEMORY OPTIMIZATION: Process chapters in chunks to prevent memory buildup
-        // This ensures we don't hold too many DOM objects in memory at once
-        const CHUNK_SIZE = 10; // Process and clean up every 10 chapters
+        // OPTIMIZATION: Process chapters in BATCHES to prevent browser freezing
+        // Only queue up to MAX_BATCH_SIZE chapters at a time to keep memory usage manageable
+        // This prevents the browser from freezing on low-end systems when downloading large books
+        let MAX_BATCH_SIZE = 50; // Default: Maximum chapters to queue simultaneously
+
+        // Get user's batch size preference if set
+        if (this.userPreferences?.batchDownloadSize?.value) {
+            let userBatchSize = parseInt(this.userPreferences.batchDownloadSize.value);
+            if (!isNaN(userBatchSize) && userBatchSize > 0) {
+                MAX_BATCH_SIZE = userBatchSize;
+            }
+        }
+
+        const CHUNK_SIZE = 10; // Memory cleanup frequency
         let completedCount = 0;
 
-        // Use rate limiter for parallel downloads with rate limiting
-        let downloadPromises = pagesToFetch.map(webPage =>
-            this.rateLimiter.execute(async () => {
-                if (util.sleepController.signal.aborted) {
-                    return;
-                }
-                await this.fetchWebPageContent(webPage);
+        // Process chapters in batches
+        for (let batchStart = 0; batchStart < pagesToFetch.length; batchStart += MAX_BATCH_SIZE) {
+            if (util.sleepController.signal.aborted) {
+                break;
+            }
 
-                completedCount++;
+            const batchEnd = Math.min(batchStart + MAX_BATCH_SIZE, pagesToFetch.length);
+            const batch = pagesToFetch.slice(batchStart, batchEnd);
 
-                // Every CHUNK_SIZE chapters, yield to event loop for cleanup
-                if (completedCount % CHUNK_SIZE === 0) {
-                    // Give browser time to process events and run garbage collection
-                    await util.sleep(100);
-                }
-            })
-        );
+            console.log(`Processing batch ${Math.floor(batchStart / MAX_BATCH_SIZE) + 1}: chapters ${batchStart + 1}-${batchEnd} of ${pagesToFetch.length}`);
 
-        // Wait for ALL chapters to complete downloading before proceeding to pack EPUB
-        await Promise.all(downloadPromises);
+            // Create download promises ONLY for chapters in this batch
+            let batchPromises = batch.map(webPage =>
+                this.rateLimiter.execute(async () => {
+                    if (util.sleepController.signal.aborted) {
+                        return;
+                    }
+                    await this.fetchWebPageContent(webPage);
+
+                    completedCount++;
+
+                    // Every CHUNK_SIZE chapters, yield to event loop for cleanup
+                    if (completedCount % CHUNK_SIZE === 0) {
+                        // Give browser time to process events and run garbage collection
+                        await util.sleep(100);
+                    }
+                }, webPage.sourceUrl)  // Pass URL for adaptive rate limit tracking
+            );
+
+            // Wait for THIS BATCH to complete before processing next batch
+            await Promise.all(batchPromises);
+
+            // No delay between batches - the per-chapter delay from getRateLimit()
+            // is already applied via the rate limiter for each chapter
+        }
 
         // Final yield before packing to ensure UI is responsive
         await util.sleep(50);
@@ -648,6 +686,10 @@ class Parser {
                 // Fetch images and update progress
                 await pageParser.fetchImagesUsedInDocument(content, webPage);
 
+                // MEMORY OPTIMIZATION: Clear the raw DOM immediately after we're done with it
+                // We've already extracted the content we need, so we can free this memory
+                delete webPage.rawDom;
+
                 // Mark chapter as complete in UI (updates happen as soon as each chapter finishes)
                 ChapterUrlsUI.showDownloadState(webPage.row, ChapterUrlsUI.DOWNLOAD_STATE_LOADED);
                 ProgressBar.updateValue(1);
@@ -673,9 +715,13 @@ class Parser {
                 if (this.userPreferences.skipChaptersThatFailFetch.value) {
                     ErrorLog.log(lastError);
                     webPage.error = lastError;
+                    // MEMORY OPTIMIZATION: Clear any partial rawDom data on failed fetch
+                    delete webPage.rawDom;
                     ChapterUrlsUI.showDownloadState(webPage.row, ChapterUrlsUI.DOWNLOAD_STATE_LOADED);
                     ProgressBar.updateValue(1); // Update progress bar even for failed chapters
                 } else {
+                    // MEMORY OPTIMIZATION: Clear rawDom before throwing error
+                    delete webPage.rawDom;
                     webPage.isIncludeable = false;
                     throw lastError;
                 }
@@ -909,7 +955,47 @@ class Parser {
             util.moveChildElements(newContent, oldContent);
         }
         return dom;
-    }    
+    }
+
+    /**
+     * Clear all downloaded data from memory after EPUB is completed
+     * This includes raw DOM objects, image data, and other collected content
+     */
+    clearMemory() {
+        // Clear all web page data (includes rawDom and other properties)
+        if (this.state && this.state.webPages) {
+            for (let webPage of this.state.webPages.values()) {
+                delete webPage.rawDom;
+                delete webPage.parser;
+                delete webPage.row;
+                delete webPage.error;
+                delete webPage.isIncludeable;
+                delete webPage.nextPrevChapters;
+            }
+            this.state.webPages.clear();
+        }
+
+        // Clear image collector cache
+        if (this.imageCollector && typeof this.imageCollector.clearCollectedImages === "function") {
+            this.imageCollector.clearCollectedImages();
+        }
+
+        // Clear fetch cache if it exists
+        if (this.fetchCache && typeof this.fetchCache.clear === "function") {
+            this.fetchCache.clear();
+        }
+
+        // Clear rate limiter
+        if (this.rateLimiter) {
+            this.rateLimiter.reset();
+        }
+
+        // Clear state references
+        if (this.state) {
+            delete this.state.firstPageDom;
+            delete this.state.chapterListUrl;
+        }
+    }
 }
 
 Parser.WEB_TO_EPUB_CLASS_NAME = "webToEpubContent";

@@ -202,10 +202,8 @@ var packNonManifestExtensionFiles = function(zip, packedFileName) {
             return addPopupHtmlToZip(zip);
         }).then(function() {
             return writeZipToDisk(zip, packedFileName);
-        }).then(function() {
-            console.log("Wrote Zip to disk");
         }).catch(function (err) {
-            console.log(err);    
+            console.log(err);
         });
 }
 
@@ -249,8 +247,13 @@ var packExtension = function(manifest, fileExtension) {
 // pack the extensions for Chrome and firefox
 readFilePromise("../plugin/manifest.json")
     .then(function (data) {
-        packExtension(makeManifestForFirefox(data), ".xpi");
-        packExtension(makeManifestForChrome(data), ".zip");
+        return packExtension(makeManifestForFirefox(data), ".xpi");
+    }).then(function () {
+        return readFilePromise("../plugin/manifest.json");
+    }).then(function (data) {
+        return packExtension(makeManifestForChrome(data), ".zip");
+    }).then(function () {
+        console.log("Wrote Zip to disk");
     }).catch(function (err) {
         console.log(err);
     });

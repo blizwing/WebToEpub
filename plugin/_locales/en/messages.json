@@ -359,6 +359,10 @@
 		"message": "Max concurrent chapter downloads",
 		"description": "Maximum number of chapters to download simultaneously"
 	},
+	"__MSG_label_Batch_Download_Size__": {
+		"message": "Batch Download Size",
+		"description": "Maximum number of chapters to queue in a batch to prevent browser freezing"
+	},
 	"__MSG_label_Manually_Select_Parser__": {
 		"message": "Manually Select Parser:",
 		"description": "Label for menu to change parser (in advanced options section)"

@@ -21,7 +21,8 @@ class ImageCollector {
     static StubCollector() {
         return {
             coverImageInfo: null,
-            imagesToPackInEpub: function() { return []; }
+            imagesToPackInEpub: function() { return []; },
+            clearCollectedImages: function() { } // No-op for stub collector
         };
     }
 
@@ -101,10 +102,17 @@ class ImageCollector {
     }
 
     async fetchImages(progressIndicator, parentPageUrl) {
+        let fetchedCount = 0;
         for (let imageInfo of this.imagesToFetch) {
             if (!imageInfo.queuedForFetch) {
                 imageInfo.queuedForFetch = true;
                 await this.fetchImage(imageInfo, progressIndicator, parentPageUrl);
+                fetchedCount++;
+
+                // Every 10 images, yield to event loop to allow garbage collection
+                if (fetchedCount % 10 === 0) {
+                    await util.sleep(0);
+                }
             }
         }
         this.imagesToFetch = [];
@@ -391,7 +399,16 @@ class ImageCollector {
         {
             let initialUrl = this.initialUrlToTry(imageInfo);
             this.urlIndex.set(initialUrl, imageInfo.index);
-            let fetchOptions = {errorHandler: new FetchImageErrorHandler(parentPageUrl) };
+            let fetchOptions = {
+                errorHandler: new FetchImageErrorHandler(parentPageUrl),
+                // Add Referer header for image requests to help with site restrictions
+                fetchOptions: {
+                    headers: {
+                        "Referer": parentPageUrl,
+                        "Origin": new URL(parentPageUrl).origin
+                    }
+                }
+            };
             let xhr = await HttpClient.wrapFetch(initialUrl, fetchOptions);
             xhr = await this.findImageFileUrl(xhr, imageInfo, imageInfo.dataOrigFileUrl, fetchOptions);
             imageInfo.mediaType = xhr.contentType;
@@ -406,9 +423,24 @@ class ImageCollector {
         }
         catch (error)
         {
-            // ToDo, implement error handler.
-            this.imagesToPack.push(imageInfo);
-            ErrorLog.log(error);
+            // Clear failed image data to free memory instead of keeping in imagesToPack
+            // Only log the error, don't keep the failed image in memory
+            delete imageInfo.arraybuffer;
+            delete imageInfo.mediaType;
+            delete imageInfo.blobImage;
+
+            // Only log 404 errors at verbose level (images from broken links are expected)
+            // Log other errors normally
+            if (error?.message?.includes("404")) {
+                console.warn("Image fetch failed (404): " + imageInfo.sourceUrl);
+            } else {
+                // Log more details about network errors
+                if (error?.message?.includes("Failed to fetch")) {
+                    console.warn("Image fetch network error (retried 3 times): " + imageInfo.sourceUrl);
+                } else {
+                    ErrorLog.log(error);
+                }
+            }
         }
     }
 
@@ -691,5 +723,23 @@ class ImageTagReplacer {
      */
     isElementInImageGallery() {
         return (this.wrappingElement.className === "thumb");
+    }
+
+    /**
+     * Clear all collected image data from memory
+     * Called after EPUB is packed to free up resources
+     */
+    clearCollectedImages() {
+        // Clear all image data
+        for (let imageInfo of this.imageInfoList) {
+            delete imageInfo.blobImage;
+            delete imageInfo.rawBlob;
+        }
+        this.imageInfoList = [];
+        this.urlIndex.clear();
+        this.bitmapIndex.clear();
+        this.imagesToFetch = [];
+        this.imagesToPack = [];
+        this.coverImageInfo = null;
     }
 }

@@ -169,6 +169,8 @@ var main = (function() {
             return Download.save(content, fileName, overwriteExisting, backgroundDownload);
         }).then(() => {
             parser.updateReadingList();
+            // Clear all downloaded data from memory after EPUB is saved
+            parser.clearMemory();
             if (util.sleepController.signal.aborted) {
                 util.sleepController = new AbortController;
                 resetUI();

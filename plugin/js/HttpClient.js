@@ -156,7 +156,18 @@ class HttpClient {
     static makeOptions() {
         return {
             credentials: "include",
-            mode: "cors"  // Explicitly set CORS mode for cross-origin requests
+            mode: "cors",  // Explicitly set CORS mode for cross-origin requests
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+                "Sec-Fetch-Dest": "image",
+                "Sec-Fetch-Mode": "no-cors",
+                "Sec-Fetch-Site": "cross-site"
+            }
         };
     }
 
@@ -213,6 +224,16 @@ class HttpClient {
         if (wrapOptions.errorHandler == null) {
             wrapOptions.errorHandler = new FetchErrorHandler();
         }
+
+        // Setup retry configuration for network errors if not already set
+        if (!wrapOptions.networkRetries) {
+            wrapOptions.networkRetries = {
+                maxAttempts: 3,
+                currentAttempt: 0,
+                delayMs: [1000, 3000, 5000] // Delays between retries in milliseconds
+            };
+        }
+
         try
         {
             console.log("Fetching URL:", url, "with options:", wrapOptions.fetchOptions);
@@ -228,9 +249,30 @@ class HttpClient {
         catch (error)
         {
             console.error("Fetch failed for:", url);
+            console.error("Error type:", error.name, "Message:", error.message);
             console.error("Fetch options were:", wrapOptions.fetchOptions);
+
+            // Check if this is a network error that can be retried
+            if (HttpClient.isNetworkError(error) && wrapOptions.networkRetries.currentAttempt < wrapOptions.networkRetries.maxAttempts) {
+                wrapOptions.networkRetries.currentAttempt++;
+                const delayMs = wrapOptions.networkRetries.delayMs[wrapOptions.networkRetries.currentAttempt - 1];
+                console.log(`Network error, retrying (attempt ${wrapOptions.networkRetries.currentAttempt}/${wrapOptions.networkRetries.maxAttempts}) after ${delayMs}ms`);
+                await util.sleep(delayMs);
+                return HttpClient.wrapFetchImpl(url, wrapOptions);
+            }
+
             return wrapOptions.errorHandler.onFetchError(url, error);
         }
+    }
+
+    static isNetworkError(error) {
+        if (!error) return false;
+        // Network errors include: TypeError for network issues, and "Failed to fetch" messages
+        return error instanceof TypeError ||
+               error.message.includes("Failed to fetch") ||
+               error.message.includes("NetworkError") ||
+               error.message.includes("Network request failed") ||
+               error.message.includes("ERR_");
     }
 
     static checkResponseAndGetData(url, wrapOptions, response) {

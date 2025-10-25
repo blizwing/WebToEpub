@@ -478,6 +478,12 @@
                         </td>
                         <td>__MSG_label_Max_Concurrent_Downloads__</td>
                     </tr>
+                    <tr id="batchDownloadSize">
+                        <td>
+                            <input id="batchDownloadSizeTag" type="number" name="batchDownloadSizeTag" min="10" max="500" style="width: 61px;">
+                        </td>
+                        <td>__MSG_label_Batch_Download_Size__</td>
+                    </tr>
                     <tr id="IncludeInReadingListRow">
                         <td><input id="includeInReadingListCheckbox" type="checkbox" name="includeInReadingListCheckbox" value="false"></td>
                         <td>__MSG_label_Include_in_Reading_List__</td>
@@ -605,6 +611,7 @@
         <script src="js/DefaultParserUI.js"></script>
         <script src="js/ProgressBar.js"></script>
         <script src="js/RateLimiter.js"></script>
+        <script src="js/AdaptiveRateLimiter.js"></script>
         <script src="js/Parser.js"></script>
         <script src="js/Library.js"></script>
 

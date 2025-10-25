@@ -271,11 +271,55 @@ var main = (function() {
                     img._packedIncrementally = true; // Mark as packed
                 }
 
+                // MEMORY OPTIMIZATION: Extract SVG metadata from processedContent BEFORE packing
+                // This metadata is needed for manifest generation during finalize()
+                // ChapterEpubItem.chapterInfo() uses chapter.title/newArc which are already cached
+                // so we only need to cache the hasSvg check
+                for (let webPage of batch) {
+                    if (webPage.processedContent && webPage._cachedMetadata === undefined) {
+                        // Cache hasSvg check (needed for manifest properties attribute)
+                        webPage._cachedMetadata = {
+                            hasSvg: false
+                        };
+
+                        // Check for SVG elements (needed for manifest)
+                        for (let node of webPage.processedContent.childNodes) {
+                            if (node.nodeType === Node.ELEMENT_NODE) {
+                                if (node.querySelector("svg") !== null) {
+                                    webPage._cachedMetadata.hasSvg = true;
+                                    break; // Found SVG, no need to continue
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Pack this batch
                 if (batchItems.length > 0) {
                     await builder.packBatch(batchItems);
                     console.log(`Batch ${batchNumber} packed successfully`);
                 }
+
+                // MEMORY OPTIMIZATION: Clean up batch data after packing
+                // For large books with 3000+ chapters, this prevents memory accumulation
+                for (let webPage of batch) {
+                    // Clear processed content (DOM nodes) - no longer needed after packing
+                    // We've already cached the metadata we need above
+                    delete webPage.processedContent;
+
+                    // Clear any remaining rawDom (if it wasn't already deleted)
+                    delete webPage.rawDom;
+                }
+
+                // Clear packed images from memory (arraybuffer data no longer needed)
+                for (let img of batchImages) {
+                    delete img.arraybuffer;
+                    delete img.blobImage;
+                    delete img.rawBlob;
+                }
+
+                // Yield to allow garbage collection
+                await util.sleep(0);
             } catch (error) {
                 console.error(`Error packing batch ${batchNumber}:`, error);
                 throw error;

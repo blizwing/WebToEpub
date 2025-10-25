@@ -35,6 +35,12 @@ class EpubItem {
     }
 
     hasSvg() {
+        // MEMORY OPTIMIZATION: Use cached result if available (nodes already deleted)
+        if (this._hasSvg !== null && this._hasSvg !== undefined) {
+            return this._hasSvg;
+        }
+
+        // Fallback to checking nodes directly (legacy path / non-incremental packing)
         if (this.nodes != null) {
             for (let n of this.nodes) {
                 if ((n.nodeType === Node.ELEMENT_NODE) &&
@@ -128,6 +134,9 @@ class ChapterEpubItem extends EpubItem { // eslint-disable-line no-unused-vars
         this.nodes = Array.from(content.childNodes);
         this.chapterTitle = chapter.title;
         this.newArc = chapter.newArc;
+        // MEMORY OPTIMIZATION: Cache hasSvg result if available (from webPage._cachedMetadata)
+        // This allows us to delete processedContent/nodes after packing
+        this._hasSvg = chapter._cachedMetadata ? chapter._cachedMetadata.hasSvg : null;
     }
 
     *chapterInfo() {

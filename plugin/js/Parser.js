@@ -216,7 +216,20 @@ class Parser {
         CoverImageUI.showCoverImageUrlInput(true);
         let coverUrl = this.findCoverImageUrl(dom);
         CoverImageUI.setCoverImageUrl(coverUrl);
+        this.updateParserMinimumDelayInfo();
         this.populateUIImpl();
+    }
+
+    updateParserMinimumDelayInfo() {
+        // Show the parser's minimum delay requirement in the UI
+        let infoSpan = document.getElementById("parserMinimumDelayInfo");
+        if (infoSpan) {
+            if (this.minimumThrottle > 0) {
+                infoSpan.textContent = `(Parser minimum: ${this.minimumThrottle}ms)`;
+            } else {
+                infoSpan.textContent = "";
+            }
+        }
     }
 
     populateUIImpl() {
@@ -573,6 +586,11 @@ class Parser {
             this.initializeRateLimiter();
         }
 
+        // MEMORY OPTIMIZATION: Process chapters in chunks to prevent memory buildup
+        // This ensures we don't hold too many DOM objects in memory at once
+        const CHUNK_SIZE = 10; // Process and clean up every 10 chapters
+        let completedCount = 0;
+
         // Use rate limiter for parallel downloads with rate limiting
         let downloadPromises = pagesToFetch.map(webPage =>
             this.rateLimiter.execute(async () => {
@@ -580,11 +598,22 @@ class Parser {
                     return;
                 }
                 await this.fetchWebPageContent(webPage);
+
+                completedCount++;
+
+                // Every CHUNK_SIZE chapters, yield to event loop for cleanup
+                if (completedCount % CHUNK_SIZE === 0) {
+                    // Give browser time to process events and run garbage collection
+                    await util.sleep(100);
+                }
             })
         );
 
         // Wait for ALL chapters to complete downloading before proceeding to pack EPUB
         await Promise.all(downloadPromises);
+
+        // Final yield before packing to ensure UI is responsive
+        await util.sleep(50);
     }
 
     async addParsersToPages(pagesToFetch) {
@@ -617,9 +646,15 @@ class Parser {
                 }
                 // Fetch images and update progress
                 await pageParser.fetchImagesUsedInDocument(content, webPage);
+
                 // Mark chapter as complete in UI (updates happen as soon as each chapter finishes)
                 ChapterUrlsUI.showDownloadState(webPage.row, ChapterUrlsUI.DOWNLOAD_STATE_LOADED);
                 ProgressBar.updateValue(1);
+
+                // MEMORY OPTIMIZATION: Yield to browser event loop to prevent freezing
+                // This allows the browser to update UI and run garbage collection
+                await util.sleep(0);
+
                 return; // Success - exit retry loop
             } catch (error) {
                 lastError = error;
@@ -663,7 +698,22 @@ class Parser {
     }
 
     removeUnusedElementsToReduceMemoryConsumption(webPageDom) {
-        util.removeElements(webPageDom.querySelectorAll("select, iframe"));
+        // MEMORY OPTIMIZATION: Remove more unused elements to reduce DOM size
+        // Remove interactive elements, scripts, styles, and other heavy elements
+        util.removeElements(webPageDom.querySelectorAll(
+            "select, iframe, video, audio, object, embed, " +
+            "script, style, link[rel='stylesheet'], " +
+            "nav, header, footer, aside, " +
+            ".sidebar, .navigation, .menu, .advertisement, .ads, " +
+            "[data-ad], [class*='ad-'], [id*='ad-']"
+        ));
+
+        // Remove inline styles to reduce memory footprint
+        let elementsWithStyle = webPageDom.querySelectorAll("[style]");
+        for (let elem of elementsWithStyle) {
+            // Keep only essential layout styles, remove everything else
+            elem.removeAttribute("style");
+        }
     }
 
     // Hook if need to chase hyperlinks in page to get all chapter content
@@ -781,12 +831,17 @@ class Parser {
 
     getRateLimit()
     {
-        let manualDelayPerChapterValue = (!isNaN(parseInt(this.userPreferences.manualDelayPerChapter.value)))?parseInt(this.userPreferences.manualDelayPerChapter.value):this.minimumThrottle;
-        if (!this.userPreferences.overrideMinimumDelay.value)
-        {
+        // Get the manual delay from user preferences
+        let manualDelayPerChapterValue = parseInt(this.userPreferences.manualDelayPerChapter.value);
+
+        // If manual delay is set and valid, use it; otherwise use parser's minimum throttle
+        if (!isNaN(manualDelayPerChapterValue) && manualDelayPerChapterValue > 0) {
+            // Use the higher of manual delay or parser's minimum (to respect site requirements)
             return Math.max(this.minimumThrottle, manualDelayPerChapterValue);
         }
-        return manualDelayPerChapterValue;
+
+        // Default to parser's minimum throttle
+        return this.minimumThrottle;
     }
 
     async rateLimitDelay() {

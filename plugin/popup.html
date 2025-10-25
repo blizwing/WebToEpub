@@ -464,13 +464,9 @@
                     </tr>
                     <tr id="manualDelayPerChapter">
                         <td>
-                            <input id="manualDelayPerChapterTag" type="number" name="manualDelayPerChapterTag" style="width: 61px;">
+                            <input id="manualDelayPerChapterTag" type="number" name="manualDelayPerChapterTag" min="0" style="width: 61px;">
                         </td>
-                        <td>__MSG_label_Manual_Delay_Per_Chapter__</td>
-                    </tr>
-                    <tr id="overrideParserDelayWithManualDelay">
-                        <td><input id="overrideMinimumDelayCheckbox" type="checkbox" name="overrideMinimumDelayCheckbox" value="false"></td>
-                        <td>__MSG_label_Override_Default_Minimum_Delay__</td>
+                        <td>__MSG_label_Manual_Delay_Per_Chapter__ <span id="parserMinimumDelayInfo" style="color: #666; font-size: 0.9em;"></span></td>
                     </tr>
                     <tr id="maxConcurrentDownloads">
                         <td>
